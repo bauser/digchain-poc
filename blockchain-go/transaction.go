@@ -8,6 +8,7 @@ import (
 	"crypto/sha256"
 	"math/big"
 	"strings"
+	"time"
 
 	"encoding/gob"
 	"encoding/hex"
@@ -68,6 +69,8 @@ func (tx *Transaction) Sign(privKey ecdsa.PrivateKey, prevTXs map[string]Transac
 
 	txCopy := tx.TrimmedCopy()
 
+	fmt.Printf("Signing tx\n")
+	stime := time.Now()
 	for inID, vin := range txCopy.Vin {
 		prevTx := prevTXs[hex.EncodeToString(vin.Txid)]
 		txCopy.Vin[inID].Signature = nil
@@ -84,6 +87,11 @@ func (tx *Transaction) Sign(privKey ecdsa.PrivateKey, prevTXs map[string]Transac
 		tx.Vin[inID].Signature = signature
 		txCopy.Vin[inID].PubKey = nil
 	}
+	etime := time.Now()
+
+	duration := etime.Sub(stime)
+	fmt.Printf("Signed tx %x\n\n", tx.Hash())
+	fmt.Printf("Time taken to sign %v\n\n", duration)
 }
 
 // String returns a human-readable representation of a transaction
@@ -142,6 +150,8 @@ func (tx *Transaction) Verify(prevTXs map[string]Transaction) bool {
 
 	txCopy := tx.TrimmedCopy()
 	curve := elliptic.P256()
+	fmt.Printf("Verifying tx %x\n", tx.Hash())
+	stime := time.Now()
 
 	for inID, vin := range tx.Vin {
 		prevTx := prevTXs[hex.EncodeToString(vin.Txid)]
@@ -168,6 +178,14 @@ func (tx *Transaction) Verify(prevTXs map[string]Transaction) bool {
 		}
 		txCopy.Vin[inID].PubKey = nil
 	}
+	etime := time.Now()
+
+	duration := etime.Sub(stime)
+	fmt.Printf("Verified tx %x\n\n", tx.Hash())
+	fmt.Printf("Time taken to verify %v\n\n", duration)
+
+	now := time.Now()
+	fmt.Println("Time: ", now)
 
 	return true
 }

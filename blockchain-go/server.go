@@ -200,7 +200,10 @@ func handleBlock(request []byte, bc *Blockchain) {
 	block := DeserializeBlock(blockData)
 
 	fmt.Println("Recevied a new block!")
+
 	bc.AddBlock(block)
+	UTXOSet := UTXOSet{bc}
+	UTXOSet.Update(block)
 
 	fmt.Printf("Added block %x\n", block.Hash)
 
@@ -209,9 +212,6 @@ func handleBlock(request []byte, bc *Blockchain) {
 		sendGetData(payload.AddrFrom, "block", blockHash)
 
 		blocksInTransit = blocksInTransit[1:]
-	} else {
-		UTXOSet := UTXOSet{bc}
-		UTXOSet.Reindex()
 	}
 }
 
@@ -339,7 +339,7 @@ func handleTx(request []byte, bc *Blockchain) {
 
 			newBlock := bc.MineBlock(txs)
 			UTXOSet := UTXOSet{bc}
-			UTXOSet.Reindex()
+			UTXOSet.Update(newBlock) //TODO: Reindex -> Update(block)
 
 			fmt.Println("New block is mined!")
 
