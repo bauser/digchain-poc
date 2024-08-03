@@ -76,7 +76,6 @@ func (tx *Transaction) Sign(privKey []byte, prevTXs map[string]Transaction) {
 		txCopy.Vin[inID].PubKeyHash = prevTx.Vout[vin.Vout].PubKeyHash
 
 		dataToSign := fmt.Sprintf("%x\n", txCopy)
-		fmt.Printf("[Sign] dataToSign: %s\n\n", txCopy)
 
 		signature, err := falcon.Sign([]byte(dataToSign), privKey)
 		if err != nil {
@@ -85,8 +84,6 @@ func (tx *Transaction) Sign(privKey []byte, prevTXs map[string]Transaction) {
 
 		tx.Vin[inID].Signature = signature
 		txCopy.Vin[inID].PubKey = nil
-
-		fmt.Printf("[Sign] signature: %x\n\n", signature)
 	}
 	etime := time.Now()
 
