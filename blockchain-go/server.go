@@ -205,6 +205,9 @@ func handleBlock(request []byte, bc *Blockchain) {
 	UTXOSet := UTXOSet{bc}
 	UTXOSet.Update(block)
 
+	PubKeySet := PubKeySet{bc}
+	PubKeySet.Update(block)
+
 	fmt.Printf("Added block %x\n", block.Hash)
 
 	if len(blocksInTransit) > 0 {
@@ -339,7 +342,10 @@ func handleTx(request []byte, bc *Blockchain) {
 
 			newBlock := bc.MineBlock(txs)
 			UTXOSet := UTXOSet{bc}
-			UTXOSet.Update(newBlock) //TODO: Reindex -> Update(block)
+			UTXOSet.Update(newBlock)
+
+			PubKeySet := PubKeySet{bc}
+			PubKeySet.Update(newBlock)
 
 			fmt.Println("New block is mined!")
 

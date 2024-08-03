@@ -2,13 +2,11 @@ package main
 
 import (
 	"bytes"
-	"crypto/ecdsa"
-	"crypto/elliptic"
-	"crypto/rand"
 	"crypto/sha256"
 	"encoding/json"
 	"log"
-	"math/big"
+
+	"falcon-go/falcon"
 
 	"golang.org/x/crypto/ripemd160"
 )
@@ -18,13 +16,16 @@ const addressChecksumLen = 4
 
 // Wallet stores private and public keys
 type Wallet struct {
-	PrivateKey ecdsa.PrivateKey
+	PrivateKey []byte
 	PublicKey  []byte
 }
 
 // NewWallet creates and returns a Wallet
 func NewWallet() *Wallet {
-	private, public := newKeyPair()
+	private, public, err := falcon.Keygen()
+	if err != nil {
+		log.Panic(err)
+	}
 	wallet := Wallet{private, public}
 
 	return &wallet
@@ -41,6 +42,16 @@ func (w Wallet) GetAddress() []byte {
 	address := Base58Encode(fullPayload)
 
 	return address
+}
+
+func PubKeyHashToAddress(pubKeyHash []byte) string {
+	versionedPayload := append([]byte{version}, pubKeyHash...)
+	checksum := checksum(versionedPayload)
+
+	fullPayload := append(versionedPayload, checksum...)
+	address := Base58Encode(fullPayload)
+
+	return string(address)
 }
 
 // HashPubKey hashes public key
@@ -76,55 +87,34 @@ func checksum(payload []byte) []byte {
 	return secondSHA[:addressChecksumLen]
 }
 
-func newKeyPair() (ecdsa.PrivateKey, []byte) {
-	curve := elliptic.P256()
-	private, err := ecdsa.GenerateKey(curve, rand.Reader)
+func newKeyPair() ([]byte, []byte) {
+	privKey, pubKey, err := falcon.Keygen()
 	if err != nil {
 		log.Panic(err)
 	}
-	pubKey := append(private.PublicKey.X.Bytes(), private.PublicKey.Y.Bytes()...)
 
-	return *private, pubKey
+	return privKey, pubKey
 }
 
 func (w Wallet) MarshalJSON() ([]byte, error) {
 	mapStringAny := map[string]any{
-		"PrivateKey": map[string]any{
-			"D": w.PrivateKey.D,
-			"PublicKey": map[string]any{
-				"X": w.PrivateKey.PublicKey.X,
-				"Y": w.PrivateKey.PublicKey.Y,
-			},
-			"X": w.PrivateKey.X,
-			"Y": w.PrivateKey.Y,
-		},
-		"PublicKey": w.PublicKey,
+		"PrivateKey": w.PrivateKey,
+		"PublicKey":  w.PublicKey,
 	}
 	return json.Marshal(mapStringAny)
 }
 
 func (w *Wallet) UnmarshalJSON(data []byte) error {
 	temp := struct {
-		PrivateKey struct {
-			D         *big.Int
-			PublicKey struct {
-				X *big.Int
-				Y *big.Int
-			}
-		}
-		PublicKey []byte
+		PrivateKey []byte
+		PublicKey  []byte
 	}{}
 
 	if err := json.Unmarshal(data, &temp); err != nil {
 		return err
 	}
 
-	w.PrivateKey.D = temp.PrivateKey.D
-	w.PrivateKey.PublicKey = ecdsa.PublicKey{
-		Curve: elliptic.P256(), // Assuming P256 curve, modify if using a different curve
-		X:     temp.PrivateKey.PublicKey.X,
-		Y:     temp.PrivateKey.PublicKey.Y,
-	}
+	w.PrivateKey = temp.PrivateKey
 	w.PublicKey = temp.PublicKey
 
 	return nil

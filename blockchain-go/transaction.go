@@ -2,10 +2,9 @@ package main
 
 import (
 	"bytes"
-	"crypto/ecdsa"
-	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/sha256"
+	"falcon-go/falcon"
 	"math/big"
 	"strings"
 	"time"
@@ -56,7 +55,7 @@ func (tx *Transaction) Hash() []byte {
 }
 
 // Sign signs each input of a Transaction
-func (tx *Transaction) Sign(privKey ecdsa.PrivateKey, prevTXs map[string]Transaction) {
+func (tx *Transaction) Sign(privKey []byte, prevTXs map[string]Transaction) {
 	if tx.IsCoinbase() {
 		return
 	}
@@ -74,18 +73,20 @@ func (tx *Transaction) Sign(privKey ecdsa.PrivateKey, prevTXs map[string]Transac
 	for inID, vin := range txCopy.Vin {
 		prevTx := prevTXs[hex.EncodeToString(vin.Txid)]
 		txCopy.Vin[inID].Signature = nil
-		txCopy.Vin[inID].PubKey = prevTx.Vout[vin.Vout].PubKeyHash
+		txCopy.Vin[inID].PubKeyHash = prevTx.Vout[vin.Vout].PubKeyHash
 
 		dataToSign := fmt.Sprintf("%x\n", txCopy)
+		fmt.Printf("[Sign] dataToSign: %s\n\n", txCopy)
 
-		r, s, err := ecdsa.Sign(rand.Reader, &privKey, []byte(dataToSign))
+		signature, err := falcon.Sign([]byte(dataToSign), privKey)
 		if err != nil {
 			log.Panic(err)
 		}
-		signature := append(r.Bytes(), s.Bytes()...)
 
 		tx.Vin[inID].Signature = signature
 		txCopy.Vin[inID].PubKey = nil
+
+		fmt.Printf("[Sign] signature: %x\n\n", signature)
 	}
 	etime := time.Now()
 
@@ -106,6 +107,7 @@ func (tx Transaction) String() string {
 		lines = append(lines, fmt.Sprintf("       TXID:      %x", input.Txid))
 		lines = append(lines, fmt.Sprintf("       Out:       %d", input.Vout))
 		lines = append(lines, fmt.Sprintf("       Signature: %x", input.Signature))
+		lines = append(lines, fmt.Sprintf("       PubKeyHash:    %x", input.PubKeyHash))
 		lines = append(lines, fmt.Sprintf("       PubKey:    %x", input.PubKey))
 	}
 
@@ -124,7 +126,7 @@ func (tx *Transaction) TrimmedCopy() Transaction {
 	var outputs []TXOutput
 
 	for _, vin := range tx.Vin {
-		inputs = append(inputs, TXInput{vin.Txid, vin.Vout, nil, nil})
+		inputs = append(inputs, TXInput{vin.Txid, vin.Vout, nil, vin.PubKeyHash, vin.PubKey})
 	}
 
 	for _, vout := range tx.Vout {
@@ -137,7 +139,7 @@ func (tx *Transaction) TrimmedCopy() Transaction {
 }
 
 // Verify verifies signatures of Transaction inputs
-func (tx *Transaction) Verify(prevTXs map[string]Transaction) bool {
+func (tx *Transaction) Verify(prevTXs map[string]Transaction, bc *Blockchain) bool {
 	if tx.IsCoinbase() {
 		return true
 	}
@@ -149,14 +151,15 @@ func (tx *Transaction) Verify(prevTXs map[string]Transaction) bool {
 	}
 
 	txCopy := tx.TrimmedCopy()
-	curve := elliptic.P256()
 	fmt.Printf("Verifying tx %x\n", tx.Hash())
 	stime := time.Now()
 
 	for inID, vin := range tx.Vin {
 		prevTx := prevTXs[hex.EncodeToString(vin.Txid)]
+		vout := prevTx.Vout[vin.Vout]
 		txCopy.Vin[inID].Signature = nil
-		txCopy.Vin[inID].PubKey = prevTx.Vout[vin.Vout].PubKeyHash
+		txCopy.Vin[inID].PubKeyHash = vout.PubKeyHash
+		txCopy.Vin[inID].PubKey = vin.PubKey
 
 		r := big.Int{}
 		s := big.Int{}
@@ -164,16 +167,32 @@ func (tx *Transaction) Verify(prevTXs map[string]Transaction) bool {
 		r.SetBytes(vin.Signature[:(sigLen / 2)])
 		s.SetBytes(vin.Signature[(sigLen / 2):])
 
-		x := big.Int{}
-		y := big.Int{}
-		keyLen := len(vin.PubKey)
-		x.SetBytes(vin.PubKey[:(keyLen / 2)])
-		y.SetBytes(vin.PubKey[(keyLen / 2):])
+		pubKey := make([]byte, 1793)
+		pubKeySet := PubKeySet{bc}
+		pubKeyFound, _ := pubKeySet.FindPubKeyOfAddr(vout.PubKeyHash)
+
+		if vin.PubKey == nil {
+			if pubKeyFound == nil {
+				log.Println("Tx pubkey not found")
+				return false
+			} else {
+				copy(pubKey, pubKeyFound)
+			}
+		} else if pubKeyFound != nil {
+			if bytes.Compare(pubKeyFound, vin.PubKey) == 0 {
+				copy(pubKey, vin.PubKey)
+			} else {
+				log.Println("Tx pubkey not the correct one")
+				return false
+			}
+		} else {
+			copy(pubKey, vin.PubKey)
+		}
 
 		dataToVerify := fmt.Sprintf("%x\n", txCopy)
 
-		rawPubKey := ecdsa.PublicKey{Curve: curve, X: &x, Y: &y}
-		if ecdsa.Verify(&rawPubKey, []byte(dataToVerify), &r, &s) == false {
+		if !falcon.Verify([]byte(dataToVerify), vin.Signature, pubKey) {
+			log.Println("Falcon verification failed")
 			return false
 		}
 		txCopy.Vin[inID].PubKey = nil
@@ -202,7 +221,7 @@ func NewCoinbaseTX(to, data string) *Transaction {
 		data = fmt.Sprintf("%x", randData)
 	}
 
-	txin := TXInput{[]byte{}, -1, nil, []byte(data)}
+	txin := TXInput{[]byte{}, -1, nil, HashPubKey([]byte(data)), []byte(data)}
 	txout := NewTXOutput(subsidy, to)
 	tx := Transaction{nil, []TXInput{txin}, []TXOutput{*txout}}
 	tx.ID = tx.Hash()
@@ -229,8 +248,15 @@ func NewUTXOTransaction(wallet *Wallet, to string, amount int, UTXOSet *UTXOSet)
 			log.Panic(err)
 		}
 
+		pubKeySet := PubKeySet{UTXOSet.Blockchain}
 		for _, out := range outs {
-			input := TXInput{txID, out, nil, wallet.PublicKey}
+			pubKey, _ := pubKeySet.FindPubKeyOfAddr(wallet.GetAddress())
+			var input TXInput
+			if pubKey == nil {
+				input = TXInput{txID, out, nil, HashPubKey(wallet.PublicKey), wallet.PublicKey}
+			} else {
+				input = TXInput{txID, out, nil, HashPubKey(wallet.PublicKey), nil}
+			}
 			inputs = append(inputs, input)
 		}
 	}
