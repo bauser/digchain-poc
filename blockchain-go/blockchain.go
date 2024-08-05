@@ -9,6 +9,7 @@ import (
 	"os"
 
 	"github.com/boltdb/bolt"
+	shell "github.com/ipfs/go-ipfs-api"
 )
 
 const dbFile = "blockchain_falcon_%s.db"
@@ -292,10 +293,22 @@ func (bc *Blockchain) MineBlock(transactions []*Transaction) *Block {
 	var lastHash []byte
 	var lastHeight int
 
+	ipfsPort := os.Getenv("IPFS_PORT")
+	sh := shell.NewShell(fmt.Sprintf("localhost:%s", ipfsPort))
 	for _, tx := range transactions {
 		// TODO: ignore transaction if it's not valid
 		if !bc.VerifyTransaction(tx) {
 			log.Panic("ERROR: Invalid transaction")
+		}
+
+		for i, vin := range tx.Vin {
+			if len(vin.Signature) != 46 && len(vin.Signature) != 59 {
+				cid, err := sh.Add(bytes.NewBuffer(vin.Signature))
+				if err != nil {
+					log.Panic("ERROR: IPFS ADD failed")
+				}
+				tx.Vin[i].Signature = []byte(cid)
+			}
 		}
 	}
 

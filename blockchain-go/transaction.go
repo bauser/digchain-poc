@@ -166,17 +166,21 @@ func (tx *Transaction) Verify(prevTXs map[string]Transaction, bc *Blockchain) bo
 
 		pubKey := make([]byte, 1793)
 		pubKeySet := PubKeySet{bc}
-		pubKeyFound, _ := pubKeySet.FindPubKeyOfAddr(vout.PubKeyHash)
+		addr := []byte(PubKeyHashToAddress(vout.PubKeyHash))
+		pubKeyFound, err := pubKeySet.FindPubKeyOfAddr(addr)
+		if err != nil {
+			log.Panic(err)
+		}
 
-		if vin.PubKey == nil {
-			if pubKeyFound == nil {
+		if len(vin.PubKey) == 0 {
+			if len(pubKeyFound) == 0 {
 				log.Println("Tx pubkey not found")
 				return false
 			} else {
 				copy(pubKey, pubKeyFound)
 			}
-		} else if pubKeyFound != nil {
-			if bytes.Compare(pubKeyFound, vin.PubKey) == 0 {
+		} else if len(pubKeyFound) > 0 {
+			if bytes.Equal(pubKeyFound, vin.PubKey) {
 				copy(pubKey, vin.PubKey)
 			} else {
 				log.Println("Tx pubkey not the correct one")
@@ -192,7 +196,7 @@ func (tx *Transaction) Verify(prevTXs map[string]Transaction, bc *Blockchain) bo
 			log.Println("Falcon verification failed")
 			return false
 		}
-		txCopy.Vin[inID].PubKey = nil
+		txCopy.Vin[inID].PubKey = []byte{}
 	}
 	etime := time.Now()
 
@@ -249,10 +253,10 @@ func NewUTXOTransaction(wallet *Wallet, to string, amount int, UTXOSet *UTXOSet)
 		for _, out := range outs {
 			pubKey, _ := pubKeySet.FindPubKeyOfAddr(wallet.GetAddress())
 			var input TXInput
-			if pubKey == nil {
+			if len(pubKey) == 0 {
 				input = TXInput{txID, out, nil, HashPubKey(wallet.PublicKey), wallet.PublicKey}
 			} else {
-				input = TXInput{txID, out, nil, HashPubKey(wallet.PublicKey), nil}
+				input = TXInput{txID, out, nil, HashPubKey(wallet.PublicKey), []byte{}}
 			}
 			inputs = append(inputs, input)
 		}

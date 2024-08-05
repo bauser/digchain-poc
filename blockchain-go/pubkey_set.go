@@ -6,7 +6,7 @@ import (
 	"github.com/boltdb/bolt"
 )
 
-const pubkeyBucket = "chainstate"
+const pubkeyBucket = "pubkeyset"
 
 type PubKeySet struct {
 	Blockchain *Blockchain
@@ -18,15 +18,16 @@ func (p PubKeySet) FindPubKeyOfAddr(addr []byte) ([]byte, error) {
 	pubKey := []byte{}
 	err := db.View(func(tx *bolt.Tx) error {
 		b := tx.Bucket([]byte(pubkeyBucket))
-		pubKey = b.Get(addr)
+		data := b.Get(addr)
+		if len(data) > 0 {
+			pubKey = make([]byte, 1793)
+			copy(pubKey, data)
+		}
 
 		return nil
 	})
-	if err != nil {
-		return nil, nil
-	} else {
-		return pubKey, nil
-	}
+
+	return pubKey, err
 }
 
 func (u PubKeySet) Reindex() {
@@ -87,8 +88,11 @@ func (u PubKeySet) Update(block *Block) {
 
 				addr := PubKeyHashToAddress(vin.PubKeyHash)
 				pk, _ := u.FindPubKeyOfAddr([]byte(addr))
-				if pk == nil {
-					b.Put([]byte(addr), vin.PubKey)
+				if len(pk) == 0 {
+					err := b.Put([]byte(addr), vin.PubKey)
+					if err != nil {
+						log.Panic(err)
+					}
 				}
 			}
 		}

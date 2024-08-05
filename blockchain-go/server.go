@@ -9,6 +9,10 @@ import (
 	"io/ioutil"
 	"log"
 	"net"
+	"os"
+	"time"
+
+	shell "github.com/ipfs/go-ipfs-api"
 )
 
 const protocol = "tcp"
@@ -153,6 +157,23 @@ func sendGetData(address, kind string, id []byte) {
 }
 
 func sendTx(addr string, tnx *Transaction) {
+
+	ipfsPort := os.Getenv("IPFS_PORT")
+	sh := shell.NewShell(fmt.Sprintf("localhost:%s", ipfsPort))
+	for i, vin := range tnx.Vin {
+		if len(vin.Signature) != 46 && len(vin.Signature) != 59 {
+			cid, err := sh.Add(bytes.NewBuffer(vin.Signature))
+			if err != nil {
+				log.Panic("ERROR: IPFS ADD failed")
+			}
+			tnx.Vin[i].Signature = []byte(cid)
+		}
+	}
+
+	fmt.Println("Sending tx:", tnx)
+	currentTime := time.Now()
+	fmt.Println("Sending tx at:", currentTime.UnixMicro())
+
 	data := tx{nodeAddress, tnx.Serialize()}
 	payload := gobEncode(data)
 	request := append(commandToBytes("tx"), payload...)
@@ -232,6 +253,7 @@ func handleInv(request []byte, bc *Blockchain) {
 	fmt.Printf("Recevied inventory with %d %s\n", len(payload.Items), payload.Type)
 
 	if payload.Type == "block" {
+		fmt.Println("block type")
 		blocksInTransit = payload.Items
 
 		blockHash := payload.Items[0]
@@ -247,6 +269,7 @@ func handleInv(request []byte, bc *Blockchain) {
 	}
 
 	if payload.Type == "tx" {
+		fmt.Println("tx type")
 		txID := payload.Items[0]
 
 		if mempool[hex.EncodeToString(txID)].ID == nil {
@@ -283,6 +306,7 @@ func handleGetData(request []byte, bc *Blockchain) {
 
 	if payload.Type == "block" {
 		block, err := bc.GetBlock([]byte(payload.ID))
+		fmt.Printf("[handleGetData] sending block %d\n\n", block.Height)
 		if err != nil {
 			return
 		}
@@ -295,6 +319,7 @@ func handleGetData(request []byte, bc *Blockchain) {
 		tx := mempool[txID]
 
 		sendTx(payload.AddrFrom, &tx)
+
 		// delete(mempool, txID)
 	}
 }
@@ -314,6 +339,28 @@ func handleTx(request []byte, bc *Blockchain) {
 	tx := DeserializeTransaction(txData)
 	mempool[hex.EncodeToString(tx.ID)] = tx
 
+	fmt.Println("tx:", tx)
+	//Deal with IPFS CID
+	if len(tx.Vin) > 0 && (len(tx.Vin[0].Signature) == 46 || len(tx.Vin[0].Signature) == 59) {
+		stime := time.Now()
+		fmt.Println("Starting IPFS data fetching")
+		ipfsPort := os.Getenv("IPFS_PORT")
+		sh := shell.NewShell(fmt.Sprintf("localhost:%s", ipfsPort))
+		for i, vin := range tx.Vin {
+			readData, err := sh.Cat(string(vin.Signature))
+			if err != nil {
+				log.Panic(err)
+			}
+			buf := new(bytes.Buffer)
+			buf.ReadFrom(readData)
+			tx.Vin[i].Signature = buf.Bytes()
+		}
+		etime := time.Now()
+
+		duration := etime.Sub(stime)
+		fmt.Printf("Time taken to IPFS fetching %v\n\n", duration)
+	}
+
 	if nodeAddress == knownNodes[0] {
 		for _, node := range knownNodes {
 			if node != nodeAddress && node != payload.AddFrom {
@@ -321,7 +368,9 @@ func handleTx(request []byte, bc *Blockchain) {
 			}
 		}
 	} else {
-		if len(mempool) >= 2 && len(miningAddress) > 0 {
+		fmt.Println("len(mempool):", len(mempool))
+		fmt.Println("miningAddress:", miningAddress)
+		if len(mempool) >= 1 && len(miningAddress) > 0 {
 		MineTransactions:
 			var txs []*Transaction
 
@@ -331,6 +380,9 @@ func handleTx(request []byte, bc *Blockchain) {
 					txs = append(txs, &tx)
 				}
 			}
+
+			currentTime := time.Now()
+			fmt.Println("Verified txs for mining at:", currentTime.UnixMicro())
 
 			if len(txs) == 0 {
 				fmt.Println("All transactions are invalid! Waiting for new ones...")

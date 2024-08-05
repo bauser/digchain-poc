@@ -14,6 +14,8 @@ func (cli *CLI) createBlockchain(address, nodeID string) {
 
 	UTXOSet := UTXOSet{bc}
 	UTXOSet.Reindex()
+	PubKeySet := PubKeySet{bc}
+	PubKeySet.Reindex()
 
 	fmt.Println("Done!")
 }
